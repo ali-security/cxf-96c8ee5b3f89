@@ -22,13 +22,17 @@ import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.util.Collections;
 
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
 import javax.xml.namespace.QName;
 
 import org.apache.cxf.Bus;
+import org.apache.cxf.message.Message;
 import org.apache.cxf.service.model.EndpointInfo;
 import org.apache.cxf.service.model.InterfaceInfo;
 import org.apache.cxf.service.model.ServiceInfo;
 import org.apache.cxf.transport.AbstractDestination;
+import org.apache.cxf.transport.http.DestinationRegistry;
 
 import org.easymock.EasyMock;
 import org.junit.Assert;
@@ -117,6 +121,66 @@ public class FormattedServiceListWriterTest extends Assert {
         assertTrue(result, result.contains("<span class=\"value\">" + basePath + "/books</span>"));
     }
 
+    @Test
+    public void testEscapeHTMLStyleSheetPath() throws Exception {
+        AbstractDestination soap = createSoapDestination("/greeter");
+        EasyMock.replay(soap);
+
+        String styleSheetPath = "/services/\"onmouseover=\"alert(2)\"><script>alert(1)</script>?stylesheet=1";
+        String result = writeServiceList(styleSheetPath, null, "http://localhost:8080/services",
+                                         new AbstractDestination[] {soap}, NONE);
+
+        assertNoInjectedMarkup(result);
+        assertTrue(result, result.contains("<LINK type=\"text/css\" rel=\"stylesheet\" href=\""
+            + "/services/&quot;onmouseover=&quot;alert(2)&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;"
+            + "?stylesheet=1\">"));
+        // the default stylesheet is still detected after escaping
+        assertTrue(result, result.contains("<table cellpadding=\"1\" cellspacing=\"1\" border=\"1\""));
+        EasyMock.verify(soap);
+    }
+
+    @Test
+    public void testEscapeHTMLStyleSheetPathFromRequestPath() throws Exception {
+        AbstractDestination soap = createSoapDestination("/greeter");
+        Bus bus = EasyMock.createNiceMock(Bus.class);
+        DestinationRegistry registry = EasyMock.createNiceMock(DestinationRegistry.class);
+        EasyMock.expect(registry.getSortedDestinations())
+            .andReturn(new AbstractDestination[] {soap}).anyTimes();
+        HttpServletRequest request = EasyMock.createNiceMock(HttpServletRequest.class);
+        EasyMock.expect(request.getContextPath()).andReturn("").anyTimes();
+        EasyMock.expect(request.getServletPath()).andReturn("/services").anyTimes();
+        EasyMock.expect(request.getPathInfo()).andReturn("/\"><script>alert(1)</script>").anyTimes();
+        EasyMock.expect(request.getAttribute(Message.BASE_PATH))
+            .andReturn("http://localhost:8080/services").anyTimes();
+        StringWriter sw = new StringWriter();
+        PrintWriter pw = new PrintWriter(sw);
+        HttpServletResponse response = EasyMock.createNiceMock(HttpServletResponse.class);
+        EasyMock.expect(response.getWriter()).andReturn(pw).anyTimes();
+        EasyMock.replay(soap, bus, registry, request, response);
+
+        new ServiceListGeneratorServlet(registry, bus).service(request, response);
+        pw.flush();
+        String result = sw.toString();
+
+        assertNoInjectedMarkup(result);
+        assertTrue(result, result.contains("<LINK type=\"text/css\" rel=\"stylesheet\" href=\""
+            + "/services/&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;/?stylesheet=1\">"));
+        assertTrue(result, result.contains("<table cellpadding=\"1\" cellspacing=\"1\" border=\"1\""));
+    }
+
+    @Test
+    public void testBenignStyleSheetPathUnchanged() throws Exception {
+        AbstractDestination soap = createSoapDestination("/greeter");
+        EasyMock.replay(soap);
+
+        String result = writeServiceList("/cxf/services/?stylesheet=1", null, "http://localhost:8080/services",
+                                         new AbstractDestination[] {soap}, NONE);
+
+        assertTrue(result, result.contains("<LINK type=\"text/css\" rel=\"stylesheet\" "
+            + "href=\"/cxf/services/?stylesheet=1\">"));
+        assertTrue(result, result.contains("<table cellpadding=\"1\" cellspacing=\"1\" border=\"1\""));
+    }
+
     private static void assertNoInjectedMarkup(String result) {
         assertFalse(result, result.contains("<script>"));
         assertFalse(result, result.contains("</script>"));
@@ -128,8 +192,16 @@ public class FormattedServiceListWriterTest extends Assert {
                                            String basePath,
                                            AbstractDestination[] soapDestinations,
                                            AbstractDestination[] restDestinations) throws Exception {
+        return writeServiceList("/services/?stylesheet=1", bus, basePath, soapDestinations, restDestinations);
+    }
+
+    private static String writeServiceList(String styleSheetPath,
+                                           Bus bus,
+                                           String basePath,
+                                           AbstractDestination[] soapDestinations,
+                                           AbstractDestination[] restDestinations) throws Exception {
         FormattedServiceListWriter writer =
-            new FormattedServiceListWriter("/services/?stylesheet=1", "CXF - Service list", true, bus);
+            new FormattedServiceListWriter(styleSheetPath, "CXF - Service list", true, bus);
         StringWriter sw = new StringWriter();
         PrintWriter pw = new PrintWriter(sw);
         writer.writeServiceList(pw, basePath, soapDestinations, restDestinations);
