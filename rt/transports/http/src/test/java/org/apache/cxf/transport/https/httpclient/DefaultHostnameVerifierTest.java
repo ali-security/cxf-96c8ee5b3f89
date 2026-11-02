@@ -193,6 +193,21 @@ public class DefaultHostnameVerifierTest {
     }
 
     @Test
+    public void testVerifyCertHostname() {
+        // verify(String, String) is used by the deprecated com.sun.net.ssl.HostnameVerifier
+        Assert.assertTrue(impl.verify("foo.com", "foo.com"));
+        Assert.assertTrue(impl.verify("FOO.com", "foo.com"));
+        Assert.assertFalse(impl.verify("localhost", "bethal"));
+        Assert.assertFalse(impl.verify("bar.com", "foo.com"));
+        Assert.assertFalse(impl.verify("a.foo.com", "foo.com"));
+        Assert.assertTrue(impl.verify("a.foo.com", "*.foo.com"));
+        Assert.assertFalse(impl.verify("s.a.foo.com", "*.foo.com"));
+
+        Assert.assertTrue(implWithPublicSuffixCheck.verify("s.a.gov.uk", "*.a.gov.uk"));
+        Assert.assertFalse(implWithPublicSuffixCheck.verify("a.gov.uk", "*.gov.uk"));
+    }
+
+    @Test
     public void testDomainRootMatching() {
 
         Assert.assertFalse(DefaultHostnameVerifier.matchDomainRoot("a.b.c", null));
